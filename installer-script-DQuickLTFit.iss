@@ -41,7 +41,7 @@
 #define MyAppName            "DQuickLTFit"
 #define MyAppNameFull        SourcePath + "/exe/" + MyAppName
 
-#define MyAppPublisher       "Danny Petschke"
+#define MyAppPublisher       "Dr. Danny Petschke"
 #define MyAppURL             "https://dpscience.github.io/DQuickLTFit/"
 #define MyAppSupportURL      "https://www.researchgate.net/profile/Danny_Petschke"
 
@@ -77,7 +77,7 @@ AppPublisherURL                 = {#MyAppURL}
 AppSupportURL                   = {#MyAppSupportURL}
 AppUpdatesURL                   = {#MyAppURL}
 AppContact                      = https://dpscience.github.io/DQuickLTFit/
-AppCopyright                    = Copyright (c) 2016-2021 Danny Petschke
+AppCopyright                    = Copyright (c) 2016-2021 Dr. Danny Petschke
 DefaultDirName                  = {pf}\{#MyAppName}
 DefaultGroupName                = {#MyAppName}
 AllowNoIcons                    = yes
@@ -94,6 +94,7 @@ Compression                     = lzma
 SolidCompression                = yes
 
 [Code]
+{ ----------------- /MS requirements: redistributable packages ------------------------ }
 type
   INSTALLSTATE = Longint;
 
@@ -104,45 +105,63 @@ type
   INSTALLSTATE_ABSENT     = 2;   { The product is installed for a different user. }
   INSTALLSTATE_DEFAULT    = 5;   { The product is installed for the current user. }
 
-  { Visual C++ 2017 Redistributable 14.2XXX }
-  VC_2017_REDIST_X64_ADD = '{8678BA04-D161-45BE-ACA4-CC5D13073F35}';    // HKEY_CLASSES_ROOT\Installer\Dependencies\Microsoft.VS.VC_RuntimeAdditionalVSU_amd64,v14
-  VC_2017_REDIST_X64_MIN = '{7DC387B8-E6A2-480C-8EF9-A6E51AE81C19}';    // HKEY_CLASSES_ROOT\Installer\Dependencies\Microsoft.VS.VC_RuntimeMinimumVSU_amd64,v14
+/////////////////////////////////////////////////////////////////////
+function VCinstalled(const regKey: string): Boolean;
+ { Function for Inno Setup Compiler }
+ { Returns True if same or later Microsoft Visual C++ 2017-xxxx Redistributable is installed, otherwise False. }
+var
+  major: Cardinal;
+  minor: Cardinal;
+  bld: Cardinal;
+  rbld: Cardinal;
 
-function MsiQueryProductState(szProduct: string): INSTALLSTATE; 
-    external 'MsiQueryProductState{#AW}@msi.dll stdcall';
-
-function VCVersionInstalled(const ProductID: string): Boolean;
 begin
-  Result := MsiQueryProductState(ProductID) = INSTALLSTATE_DEFAULT;
+  Result := False;
+
+  if RegQueryDWordValue(HKEY_LOCAL_MACHINE, regKey, 'Major', major) then begin
+    if RegQueryDWordValue(HKEY_LOCAL_MACHINE, regKey, 'Minor', minor) then begin
+      if RegQueryDWordValue(HKEY_LOCAL_MACHINE, regKey, 'Bld', bld) then begin
+        if RegQueryDWordValue(HKEY_LOCAL_MACHINE, regKey, 'RBld', rbld) then begin
+            { MsgBox('VC 2017-2019 Redist Major is: ' + IntToStr(major) + ' Minor is: ' + IntToStr(minor) + ' Bld is: ' + IntToStr(bld) + ' Rbld is: ' + IntToStr(rbld), mbInformation, MB_OK);
+            { Version info was found. Return true if later or equal to our 14.29.30040.0 redistributable }
+            { Note brackets required because of weird operator precendence }
+            Result := (major >= 14) and (minor >= 29) and (bld >= 30040) and (rbld >= 0)
+        end
+      end
+    end
+  end
 end;
 
+/////////////////////////////////////////////////////////////////////
 function VCRedistNeedsInstall: Boolean;
 begin
-  Result := not VCVersionInstalled(VC_2017_REDIST_X64_MIN);
+ if NOT IsWin64 then 
+  Result := not (VCinstalled('SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X86'))
+ else if Is64BitInstallMode then
+  Result := not (VCinstalled('SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64'))
+ else
+  Result := not (VCinstalled('SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x86'));  
 end;
 
 { ///////////////////////////////////////////////////////////////////// }
-function GetUninstallString(): String;
+/////////////////////////////////////////////////////////////////////
+function GetUninstallString: String;
 var
   sUnInstPath: String;
   sUnInstallString: String;
-  UserSIDs: TArrayOfString; 
-  I: Integer;
+
 begin
   sUnInstPath := ExpandConstant('Software\Microsoft\Windows\CurrentVersion\Uninstall\{#emit SetupSetting("AppId")}_is1');
   sUnInstallString := '';
-  if not RegQueryStringValue(HKCU, sUnInstPath, 'UninstallString', sUnInstallString) then 
-    if isAdminLoggedOn() and RegGetSubkeyNames( HKEY_USERS, '', UserSIDs ) then 
-      for I := 0 to GetArrayLength( UserSIDs ) - 1 do begin 
-        if RegQueryStringValue( HKEY_USERS, UserSIDs[I] + '\' + sUnInstPath, 'UninstallString', sUnInstallString ) then 
-          break; 
-  end;
-end; 
 
-{ ///////////////////////////////////////////////////////////////////// }
-function IsUpgrade(): Boolean;
-begin
-  Result := (GetUninstallString() <> '');
+  if not RegQueryStringValue(HKLM, sUnInstPath, 'UninstallString', sUnInstallString) then begin
+    sUnInstallString := '';
+    if not RegQueryStringValue(HKCU, sUnInstPath, 'UninstallString', sUnInstallString) then begin
+      sUnInstallString := '';
+    end
+  end;
+  
+  Result := sUnInstallString;
 end;
 
 { ///////////////////////////////////////////////////////////////////// }
@@ -174,12 +193,8 @@ end;
 { ///////////////////////////////////////////////////////////////////// }
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if (CurStep=ssInstall) then
-  begin
-    if (IsUpgrade()) then
-    begin
+  if (CurStep=ssInstall) then begin
       UnInstallOldVersion();
-    end;
   end;
 end;
 
